@@ -1,0 +1,123 @@
+version: '3'
+
+services:
+  kafdrop:
+    image: alexsuf/kafdrop
+    container_name: kafdrop
+    restart: no
+    ports:
+      - 9000:9000   # http://127.0.0.1:9000/
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:29092"
+      JVM_OPTS: "-Xms16M -Xmx48M -Xss180K -XX:-TieredCompilation -XX:+UseStringDeduplication -noverify"
+      TZ: Europe/Moscow
+    depends_on:
+      - kafka
+
+  zookeeper:
+    image: alexsuf/zookeeper
+    container_name: zookeeper
+    ports:
+     - 2181:2181
+     - 2888:2888
+     - 3888:3888
+    volumes:
+      - ./zookeeper_log:/var/lib/zookeeper/log
+      - ./zookeeper_secrets:/etc/zookeeper/secrets
+      - ./zookeeper_data:/var/lib/zookeeper/data
+    environment:
+      TZ: Europe/Moscow
+
+  kafka:
+    image: alexsuf/kafka
+    container_name: kafka
+    ports:
+     - 9092:9092
+    links:
+     - zookeeper
+    environment:
+      ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: "INTERNAL://:29092,EXTERNAL://:9092"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:29092,EXTERNAL://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_ZOOKEEPER_SESSION_TIMEOUT: "6000"
+      KAFKA_RESTART_ATTEMPTS: "10"
+      KAFKA_RESTART_DELAY: "5"
+      ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: "0"
+      TZ: Europe/Moscow
+    volumes:
+      - ./kafka_secrets:/etc/kafka/secrets
+      - ./kafka_data:/var/lib/kafka/data
+
+  connect:
+    image: alexsuf/kafka_connect
+    container_name: kafka_connect
+    ports:
+     - 8083:8083
+    links:
+     - kafka
+     - source
+     - target
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: my_connect_configs
+      OFFSET_STORAGE_TOPIC: my_connect_offsets
+      STATUS_STORAGE_TOPIC: my_source_connect_statuses
+      TZ: Europe/Moscow
+    volumes:
+      - ./connect_config:/kafka/config
+      - ./connect_data:/kafka/data
+      - ./connect_logs:/kafka/logs
+
+  source: 
+    image: alexsuf/postgres
+    container_name: source
+    ports:
+     - "1111:5432"
+    environment:
+      POSTGRES_USER: db_user
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: source_db
+      TZ: Europe/Moscow
+    volumes:
+      - ./source_db:/var/lib/postgresql/data
+      - ./on_startup.sql:/docker-entrypoint-initdb.d/init.sql
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+
+  target:
+    image: alexsuf/postgres
+    container_name: target
+    ports:
+     - "1112:5432"
+    environment:
+      POSTGRES_USER: db_user
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: target_db
+      TZ: Europe/Moscow
+    volumes:
+      - ./target_db:/var/lib/postgresql/data
+
+  greenplum:
+      image: alexsuf/greenplum 
+      container_name: greenplum
+      restart: no
+      environment:
+        POSTGRES_USER: gpadmin
+        POSTGRES_PASSWORD: gpadmin
+        POSTGRES_DB: test
+        TZ: Europe/Moscow
+      ports:
+       - 1113:5432
+      stdin_open: true
+      tty: true
+      volumes:
+       - greenplum_db:/gpdata
+
+volumes:
+  greenplum_db:
+    external: true
